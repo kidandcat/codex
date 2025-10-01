@@ -23,6 +23,8 @@ pub(crate) struct StatusIndicatorWidget {
     header: String,
     /// Queued user messages to display under the status line.
     queued_messages: Vec<String>,
+    /// Count of currently running background processes.
+    background_process_count: usize,
 
     elapsed_running: Duration,
     last_resume_at: Instant,
@@ -53,6 +55,7 @@ impl StatusIndicatorWidget {
         Self {
             header: String::from("Working"),
             queued_messages: Vec::new(),
+            background_process_count: 0,
             elapsed_running: Duration::ZERO,
             last_resume_at: Instant::now(),
             is_paused: false,
@@ -108,6 +111,13 @@ impl StatusIndicatorWidget {
         self.frame_requester.schedule_frame();
     }
 
+    pub(crate) fn set_background_process_count(&mut self, count: usize) {
+        if self.background_process_count != count {
+            self.background_process_count = count;
+            self.frame_requester.schedule_frame();
+        }
+    }
+
     pub(crate) fn pause_timer(&mut self) {
         self.pause_timer_at(Instant::now());
     }
@@ -161,12 +171,11 @@ impl WidgetRef for StatusIndicatorWidget {
         // Plain rendering: no borders or padding so the live cell is visually indistinguishable from terminal scrollback.
         let mut spans = vec!["  ".into()];
         spans.extend(shimmer_spans(&self.header));
-        spans.extend(vec![
-            " ".into(),
-            format!("({pretty_elapsed} • ").dim(),
-            "Esc".dim().bold(),
-            " to interrupt)".dim(),
-        ]);
+        spans.push(" ".into());
+        let count = self.background_process_count;
+        spans.push(format!("({pretty_elapsed} • background: {count} • ").dim());
+        spans.push("Esc".dim().bold());
+        spans.push(" to interrupt)".dim());
 
         // Build lines: status, then queued messages, then spacer.
         let mut lines: Vec<Line<'static>> = Vec::new();

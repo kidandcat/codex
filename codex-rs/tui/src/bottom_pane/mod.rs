@@ -68,6 +68,7 @@ pub(crate) struct BottomPane {
     status: Option<StatusIndicatorWidget>,
     /// Queued user messages to show under the status indicator.
     queued_user_messages: Vec<String>,
+    background_process_count: usize,
     context_window_percent: Option<u8>,
 }
 
@@ -100,6 +101,7 @@ impl BottomPane {
             ctrl_c_quit_hint: false,
             status: None,
             queued_user_messages: Vec::new(),
+            background_process_count: 0,
             esc_backtrack_hint: false,
             context_window_percent: None,
         }
@@ -335,6 +337,7 @@ impl BottomPane {
             }
             if let Some(status) = self.status.as_mut() {
                 status.set_queued_messages(self.queued_user_messages.clone());
+                status.set_background_process_count(self.background_process_count);
             }
             self.request_redraw();
         } else {
@@ -364,6 +367,17 @@ impl BottomPane {
         self.queued_user_messages = queued.clone();
         if let Some(status) = self.status.as_mut() {
             status.set_queued_messages(queued);
+        }
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_background_process_count(&mut self, count: usize) {
+        if self.background_process_count == count {
+            return;
+        }
+        self.background_process_count = count;
+        if let Some(status) = self.status.as_mut() {
+            status.set_background_process_count(count);
         }
         self.request_redraw();
     }

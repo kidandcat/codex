@@ -483,6 +483,8 @@ pub enum EventMsg {
 
     BackgroundEvent(BackgroundEventEvent),
 
+    BackgroundProcessStatus(BackgroundProcessStatusEvent),
+
     /// Notification that a model stream experienced an error or disconnect
     /// and the system is handling it (e.g., retrying with backoff).
     StreamError(StreamErrorEvent),
@@ -1123,6 +1125,11 @@ pub struct ApplyPatchApprovalRequestEvent {
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct BackgroundEventEvent {
     pub message: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+pub struct BackgroundProcessStatusEvent {
+    pub running: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]

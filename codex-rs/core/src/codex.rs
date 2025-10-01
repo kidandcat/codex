@@ -94,6 +94,7 @@ use crate::protocol::AgentReasoningSectionBreakEvent;
 use crate::protocol::ApplyPatchApprovalRequestEvent;
 use crate::protocol::AskForApproval;
 use crate::protocol::BackgroundEventEvent;
+use crate::protocol::BackgroundProcessStatusEvent;
 use crate::protocol::ErrorEvent;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
@@ -506,6 +507,9 @@ impl Session {
             services,
             next_internal_sub_id: AtomicU64::new(0),
         });
+
+        sess.background_processes()
+            .set_session(Arc::downgrade(&sess));
 
         // Dispatch the SessionConfiguredEvent first and then report any errors.
         // If resuming, include converted initial messages in the payload so UIs can render them immediately.
@@ -982,6 +986,14 @@ impl Session {
             msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
                 message: message.into(),
             }),
+        };
+        self.send_event(event).await;
+    }
+
+    pub(crate) async fn notify_background_process_count(&self, running: u64) {
+        let event = Event {
+            id: INITIAL_SUBMIT_ID.to_owned(),
+            msg: EventMsg::BackgroundProcessStatus(BackgroundProcessStatusEvent { running }),
         };
         self.send_event(event).await;
     }
