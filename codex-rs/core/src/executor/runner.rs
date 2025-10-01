@@ -20,11 +20,16 @@ use crate::exec::process_exec_tool_call;
 use crate::executor::errors::ExecError;
 use crate::executor::sandbox::select_sandbox;
 use crate::function_tool::FunctionCallError;
+use crate::landlock::spawn_command_under_linux_sandbox;
 use crate::protocol::AskForApproval;
 use crate::protocol::ReviewDecision;
 use crate::protocol::SandboxPolicy;
+use crate::seatbelt::spawn_command_under_seatbelt;
 use crate::shell;
+use crate::spawn::StdioPolicy;
+use crate::spawn::spawn_child_async;
 use codex_otel::otel_event_manager::ToolDecisionSource;
+use tokio::process::Child;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ExecutorConfig {
@@ -158,6 +163,59 @@ impl Executor {
         }
     }
 
+    pub(crate) async fn spawn_background(
+        &self,
+        request: &mut ExecutionRequest,
+        session: &Session,
+        approval_policy: AskForApproval,
+        context: &ExecCommandContext,
+    ) -> Result<(Child, SandboxType), ExecError> {
+        if matches!(request.mode, ExecutionMode::Shell) {
+            let params = request.params.clone();
+            request.params =
+                maybe_translate_shell_command(params, session, request.use_shell_profile);
+        }
+
+        let backend = backend_for_mode(&request.mode);
+        request.params = backend
+            .prepare(request.params.clone(), &request.mode)
+            .map_err(ExecError::from)?;
+
+        let config = self
+            .config
+            .read()
+            .map_err(|_| ExecError::rejection("executor config poisoned"))?
+            .clone();
+
+        let sandbox_decision = select_sandbox(
+            request,
+            approval_policy,
+            self.approval_cache.snapshot(),
+            &config,
+            session,
+            &context.sub_id,
+            &context.call_id,
+            &context.otel_event_manager,
+        )
+        .await?;
+
+        match self
+            .spawn_child_for_background(
+                request.params.clone(),
+                sandbox_decision.initial_sandbox,
+                &config,
+            )
+            .await
+        {
+            Ok(child) => Ok((child, sandbox_decision.initial_sandbox)),
+            Err(CodexErr::Sandbox(err)) if sandbox_decision.escalate_on_failure => {
+                self.retry_background_without_sandbox(request, &config, session, context, err)
+                    .await
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
+
     /// Fallback path invoked when a sandboxed run is denied so the user can
     /// approve rerunning without isolation.
     async fn retry_without_sandbox(
@@ -217,6 +275,57 @@ impl Executor {
         }
     }
 
+    async fn retry_background_without_sandbox(
+        &self,
+        request: &ExecutionRequest,
+        config: &ExecutorConfig,
+        session: &Session,
+        context: &ExecCommandContext,
+        sandbox_error: SandboxErr,
+    ) -> Result<(Child, SandboxType), ExecError> {
+        session
+            .notify_background_event(
+                &context.sub_id,
+                format!("Execution failed: {sandbox_error}"),
+            )
+            .await;
+        let decision = session
+            .request_command_approval(
+                context.sub_id.to_string(),
+                context.call_id.to_string(),
+                request.approval_command.clone(),
+                request.params.cwd.clone(),
+                Some("command failed; retry without sandbox?".to_string()),
+            )
+            .await;
+
+        context.otel_event_manager.tool_decision(
+            &context.tool_name,
+            &context.call_id,
+            decision,
+            ToolDecisionSource::User,
+        );
+
+        match decision {
+            ReviewDecision::Approved | ReviewDecision::ApprovedForSession => {
+                if matches!(decision, ReviewDecision::ApprovedForSession) {
+                    self.approval_cache.insert(request.approval_command.clone());
+                }
+                session
+                    .notify_background_event(&context.sub_id, "retrying command without sandbox")
+                    .await;
+
+                let child = self
+                    .spawn_child_for_background(request.params.clone(), SandboxType::None, config)
+                    .await?;
+                Ok((child, SandboxType::None))
+            }
+            ReviewDecision::Denied | ReviewDecision::Abort => {
+                Err(ExecError::rejection("exec command rejected by user"))
+            }
+        }
+    }
+
     async fn spawn(
         &self,
         params: ExecParams,
@@ -233,6 +342,63 @@ impl Executor {
             stdout_stream,
         )
         .await
+    }
+
+    async fn spawn_child_for_background(
+        &self,
+        params: ExecParams,
+        sandbox: SandboxType,
+        config: &ExecutorConfig,
+    ) -> Result<Child, CodexErr> {
+        let ExecParams {
+            command, cwd, env, ..
+        } = params;
+
+        match sandbox {
+            SandboxType::None => {
+                let (program, args) = command.split_first().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "command args are empty")
+                })?;
+                spawn_child_async(
+                    PathBuf::from(program),
+                    args.to_vec(),
+                    None,
+                    cwd,
+                    &config.sandbox_policy,
+                    StdioPolicy::RedirectForShellTool,
+                    env,
+                )
+                .await
+                .map_err(Into::into)
+            }
+            SandboxType::MacosSeatbelt => spawn_command_under_seatbelt(
+                command,
+                cwd,
+                &config.sandbox_policy,
+                &config.sandbox_cwd,
+                StdioPolicy::RedirectForShellTool,
+                env,
+            )
+            .await
+            .map_err(Into::into),
+            SandboxType::LinuxSeccomp => {
+                let codex_linux = config
+                    .codex_linux_sandbox_exe
+                    .as_ref()
+                    .ok_or(CodexErr::LandlockSandboxExecutableNotProvided)?;
+                spawn_command_under_linux_sandbox(
+                    codex_linux,
+                    command,
+                    cwd,
+                    &config.sandbox_policy,
+                    &config.sandbox_cwd,
+                    StdioPolicy::RedirectForShellTool,
+                    env,
+                )
+                .await
+                .map_err(Into::into)
+            }
+        }
     }
 }
 

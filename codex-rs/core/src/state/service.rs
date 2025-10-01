@@ -1,4 +1,5 @@
 use crate::RolloutRecorder;
+use crate::background_process::BackgroundProcessManager;
 use crate::exec_command::ExecSessionManager;
 use crate::executor::Executor;
 use crate::mcp_connection_manager::McpConnectionManager;
@@ -15,4 +16,5 @@ pub(crate) struct SessionServices {
     pub(crate) user_shell: crate::shell::Shell,
     pub(crate) show_raw_agent_reasoning: bool,
     pub(crate) executor: Executor,
+    pub(crate) background_process_manager: BackgroundProcessManager,
 }

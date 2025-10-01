@@ -205,6 +205,76 @@ fn create_unified_exec_tool() -> OpenAiTool {
     })
 }
 
+fn create_background_process_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "action".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Action to perform. Supported actions: start, list, logs, kill.".to_string(),
+            ),
+        },
+    );
+    properties.insert(
+        "command".to_string(),
+        JsonSchema::Array {
+            items: Box::new(JsonSchema::String { description: None }),
+            description: Some("Command and arguments to run when action is \"start\".".to_string()),
+        },
+    );
+    properties.insert(
+        "cwd".to_string(),
+        JsonSchema::String {
+            description: Some("Optional working directory for the process.".to_string()),
+        },
+    );
+    properties.insert(
+        "env".to_string(),
+        JsonSchema::Object {
+            properties: BTreeMap::new(),
+            required: None,
+            additional_properties: Some(true),
+        },
+    );
+    properties.insert(
+        "process_id".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Target process id for actions that operate on existing processes.".to_string(),
+            ),
+        },
+    );
+    properties.insert(
+        "with_escalated_permissions".to_string(),
+        JsonSchema::Boolean {
+            description: Some(
+                "Set to true to request unsandboxed execution; only valid when approval policy allows on-request escalations.".to_string(),
+            ),
+        },
+    );
+    properties.insert(
+        "justification".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Human-readable justification required when requesting escalated permissions."
+                    .to_string(),
+            ),
+        },
+    );
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "background_process".to_string(),
+        description:
+            "Manage long-lived background processes: start commands, list them, fetch logs, or terminate them.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["action".to_string()]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
 fn create_shell_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
     properties.insert(
@@ -503,6 +573,8 @@ pub(crate) fn get_openai_tools(
         }
     }
 
+    tools.push(create_background_process_tool());
+
     if config.plan_tool {
         tools.push(PLAN_TOOL.clone());
     }
@@ -593,7 +665,13 @@ mod tests {
 
         assert_eq_tool_names(
             &tools,
-            &["unified_exec", "update_plan", "web_search", "view_image"],
+            &[
+                "unified_exec",
+                "background_process",
+                "update_plan",
+                "web_search",
+                "view_image",
+            ],
         );
     }
 
@@ -613,7 +691,13 @@ mod tests {
 
         assert_eq_tool_names(
             &tools,
-            &["unified_exec", "update_plan", "web_search", "view_image"],
+            &[
+                "unified_exec",
+                "background_process",
+                "update_plan",
+                "web_search",
+                "view_image",
+            ],
         );
     }
 
@@ -671,6 +755,7 @@ mod tests {
             &tools,
             &[
                 "unified_exec",
+                "background_process",
                 "web_search",
                 "view_image",
                 "test_server/do_something_cool",
@@ -678,7 +763,7 @@ mod tests {
         );
 
         assert_eq!(
-            tools[3],
+            tools[4],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -789,6 +874,7 @@ mod tests {
             &tools,
             &[
                 "unified_exec",
+                "background_process",
                 "view_image",
                 "test_server/cool",
                 "test_server/do",
@@ -835,11 +921,17 @@ mod tests {
 
         assert_eq_tool_names(
             &tools,
-            &["unified_exec", "web_search", "view_image", "dash/search"],
+            &[
+                "unified_exec",
+                "background_process",
+                "web_search",
+                "view_image",
+                "dash/search",
+            ],
         );
 
         assert_eq!(
-            tools[3],
+            tools[4],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/search".to_string(),
                 parameters: JsonSchema::Object {
@@ -894,10 +986,16 @@ mod tests {
 
         assert_eq_tool_names(
             &tools,
-            &["unified_exec", "web_search", "view_image", "dash/paginate"],
+            &[
+                "unified_exec",
+                "background_process",
+                "web_search",
+                "view_image",
+                "dash/paginate",
+            ],
         );
         assert_eq!(
-            tools[3],
+            tools[4],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/paginate".to_string(),
                 parameters: JsonSchema::Object {
@@ -950,10 +1048,16 @@ mod tests {
 
         assert_eq_tool_names(
             &tools,
-            &["unified_exec", "web_search", "view_image", "dash/tags"],
+            &[
+                "unified_exec",
+                "background_process",
+                "web_search",
+                "view_image",
+                "dash/tags",
+            ],
         );
         assert_eq!(
-            tools[3],
+            tools[4],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/tags".to_string(),
                 parameters: JsonSchema::Object {
@@ -1009,10 +1113,16 @@ mod tests {
 
         assert_eq_tool_names(
             &tools,
-            &["unified_exec", "web_search", "view_image", "dash/value"],
+            &[
+                "unified_exec",
+                "background_process",
+                "web_search",
+                "view_image",
+                "dash/value",
+            ],
         );
         assert_eq!(
-            tools[3],
+            tools[4],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/value".to_string(),
                 parameters: JsonSchema::Object {
