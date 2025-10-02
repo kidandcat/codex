@@ -16,6 +16,7 @@ pub(crate) struct FooterProps {
     pub(crate) use_shift_enter_hint: bool,
     pub(crate) is_task_running: bool,
     pub(crate) context_window_percent: Option<u8>,
+    pub(crate) continuous_mode_enabled: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -79,9 +80,12 @@ fn footer_lines(props: FooterProps) -> Vec<Line<'static>> {
         })],
         FooterMode::ShortcutPrompt => {
             if props.is_task_running {
-                vec![context_window_line(props.context_window_percent)]
+                vec![context_window_line(
+                    props.context_window_percent,
+                    props.continuous_mode_enabled,
+                )]
             } else {
-                vec![dim_line(indent_text("? for shortcuts"))]
+                vec![shortcut_prompt_line(props.continuous_mode_enabled)]
             }
         }
         FooterMode::ShortcutOverlay => shortcut_overlay_lines(ShortcutsState {
@@ -219,7 +223,19 @@ fn dim_line(text: String) -> Line<'static> {
     Line::from(text).dim()
 }
 
-fn context_window_line(percent: Option<u8>) -> Line<'static> {
+fn shortcut_prompt_line(continuous_mode_enabled: bool) -> Line<'static> {
+    if !continuous_mode_enabled {
+        return dim_line(indent_text("? for shortcuts"));
+    }
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(indent_text("").into());
+    spans.push("? for shortcuts".dim());
+    append_continuous_mode_indicator(&mut spans);
+    Line::from(spans)
+}
+
+fn context_window_line(percent: Option<u8>, continuous_mode_enabled: bool) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(indent_text("").into());
     match percent {
@@ -231,7 +247,16 @@ fn context_window_line(percent: Option<u8>) -> Line<'static> {
             spans.push("? for shortcuts".dim());
         }
     }
+    if continuous_mode_enabled {
+        append_continuous_mode_indicator(&mut spans);
+    }
     Line::from(spans)
+}
+
+fn append_continuous_mode_indicator(spans: &mut Vec<Span<'static>>) {
+    spans.push("  ·  ".dim());
+    spans.push("continuous mode".cyan());
+    spans.push(" (Ctrl+G to stop)".dim());
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -422,6 +447,7 @@ mod tests {
                 use_shift_enter_hint: false,
                 is_task_running: false,
                 context_window_percent: None,
+                continuous_mode_enabled: false,
             },
         );
 
@@ -433,6 +459,7 @@ mod tests {
                 use_shift_enter_hint: true,
                 is_task_running: false,
                 context_window_percent: None,
+                continuous_mode_enabled: false,
             },
         );
 
@@ -444,6 +471,7 @@ mod tests {
                 use_shift_enter_hint: false,
                 is_task_running: false,
                 context_window_percent: None,
+                continuous_mode_enabled: false,
             },
         );
 
@@ -455,6 +483,7 @@ mod tests {
                 use_shift_enter_hint: false,
                 is_task_running: true,
                 context_window_percent: None,
+                continuous_mode_enabled: false,
             },
         );
 
@@ -466,6 +495,7 @@ mod tests {
                 use_shift_enter_hint: false,
                 is_task_running: false,
                 context_window_percent: None,
+                continuous_mode_enabled: false,
             },
         );
 
@@ -477,6 +507,7 @@ mod tests {
                 use_shift_enter_hint: false,
                 is_task_running: false,
                 context_window_percent: None,
+                continuous_mode_enabled: false,
             },
         );
 
@@ -488,6 +519,31 @@ mod tests {
                 use_shift_enter_hint: false,
                 is_task_running: true,
                 context_window_percent: Some(72),
+                continuous_mode_enabled: false,
+            },
+        );
+
+        snapshot_footer(
+            "footer_shortcuts_continuous",
+            FooterProps {
+                mode: FooterMode::ShortcutPrompt,
+                esc_backtrack_hint: false,
+                use_shift_enter_hint: false,
+                is_task_running: false,
+                context_window_percent: None,
+                continuous_mode_enabled: true,
+            },
+        );
+
+        snapshot_footer(
+            "footer_shortcuts_context_continuous",
+            FooterProps {
+                mode: FooterMode::ShortcutPrompt,
+                esc_backtrack_hint: false,
+                use_shift_enter_hint: false,
+                is_task_running: true,
+                context_window_percent: Some(72),
+                continuous_mode_enabled: true,
             },
         );
     }

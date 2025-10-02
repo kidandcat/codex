@@ -256,6 +256,8 @@ pub(crate) struct ChatWidget {
     ghost_snapshots_disabled: bool,
     // Whether to add a final message separator after the last message
     needs_final_message_separator: bool,
+    // When true, automatically send "continue" when the agent finishes a turn.
+    continuous_mode_enabled: bool,
 
     last_rendered_width: std::cell::Cell<Option<usize>>,
 }
@@ -389,6 +391,7 @@ impl ChatWidget {
 
         // If there is a queued user message, send exactly one now to begin the next turn.
         self.maybe_send_next_queued_input();
+        self.maybe_send_continuation_request();
         // Emit a notification when the turn completes (suppressed if focused).
         self.notify(Notification::AgentTurnComplete {
             response: last_agent_message.unwrap_or_default(),
@@ -465,6 +468,9 @@ impl ChatWidget {
     fn on_interrupted_turn(&mut self, reason: TurnAbortReason) {
         // Finalize, log a gentle prompt, and clear running state.
         self.finalize_turn();
+        if self.continuous_mode_enabled && reason == TurnAbortReason::Interrupted {
+            self.set_continuous_mode_enabled(false);
+        }
 
         if reason != TurnAbortReason::ReviewEnded {
             self.add_to_history(history_cell::new_error_event(
@@ -930,6 +936,7 @@ impl ChatWidget {
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: true,
             needs_final_message_separator: false,
+            continuous_mode_enabled: false,
             last_rendered_width: std::cell::Cell::new(None),
         }
     }
@@ -993,6 +1000,7 @@ impl ChatWidget {
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: true,
             needs_final_message_separator: false,
+            continuous_mode_enabled: false,
             last_rendered_width: std::cell::Cell::new(None),
         }
     }
@@ -1022,6 +1030,17 @@ impl ChatWidget {
                 return;
             }
             KeyEvent {
+                code: KeyCode::Char('g'),
+                modifiers: KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                self.bottom_pane.clear_ctrl_c_quit_hint();
+                let enabled = !self.continuous_mode_enabled;
+                self.set_continuous_mode_enabled(enabled);
+                return;
+            }
+            KeyEvent {
                 code: KeyCode::Char('v'),
                 modifiers: KeyModifiers::CONTROL,
                 kind: KeyEventKind::Press,
@@ -1031,6 +1050,14 @@ impl ChatWidget {
                     self.attach_image(path, info.width, info.height, info.encoded_format.label());
                 }
                 return;
+            }
+            KeyEvent {
+                code: KeyCode::Esc,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                ..
+            } if self.bottom_pane.is_task_running() && self.continuous_mode_enabled => {
+                self.set_continuous_mode_enabled(false);
             }
             other if other.kind == KeyEventKind::Press => {
                 self.bottom_pane.clear_ctrl_c_quit_hint();
@@ -1518,6 +1545,21 @@ impl ChatWidget {
         self.frame_requester.schedule_frame();
     }
 
+    fn set_continuous_mode_enabled(&mut self, enabled: bool) {
+        if self.continuous_mode_enabled == enabled {
+            return;
+        }
+        self.continuous_mode_enabled = enabled;
+        self.bottom_pane.set_continuous_mode_enabled(enabled);
+        if enabled {
+            if !self.maybe_send_continuation_request() {
+                self.request_redraw();
+            }
+        } else {
+            self.request_redraw();
+        }
+    }
+
     fn notify(&mut self, notification: Notification) {
         if !notification.allowed_for(&self.config.tui_notifications) {
             return;
@@ -1555,6 +1597,24 @@ impl ChatWidget {
         }
         // Update the list to reflect the remaining queued messages (if any).
         self.refresh_queued_user_messages();
+    }
+
+    fn maybe_send_continuation_request(&mut self) -> bool {
+        if !self.continuous_mode_enabled {
+            return false;
+        }
+        if self.bottom_pane.is_task_running() {
+            return false;
+        }
+        if !self.queued_user_messages.is_empty() {
+            return false;
+        }
+        if !self.bottom_pane.composer_is_empty() {
+            return false;
+        }
+        self.submit_user_message(UserMessage::from("continue".to_string()));
+        self.request_redraw();
+        true
     }
 
     /// Rebuild and update the queued user messages from the current queue.
