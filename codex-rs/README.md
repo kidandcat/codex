@@ -1,5 +1,10 @@
 # Codex CLI (Rust Implementation)
 
+## Fork-specific features
+
+- Background process support so long-running tasks can continue after Codex responds, complete with status tracking in the TUI header.
+- Continuous chat mode that keeps Codex engaged without manually resubmitting prompts, making it easier to iterate alongside background work.
+
 We provide Codex CLI as a standalone, native executable to ensure a zero-dependency install.
 
 ## Installing Codex
