@@ -618,7 +618,18 @@ impl ChatWidget {
 
     fn on_stream_error(&mut self, message: String) {
         // Show stream errors in the transcript so users see retry/backoff info.
+        let lowered = message.to_ascii_lowercase();
+        let context_window_error = lowered.contains("context window") && lowered.contains("exceed");
+        let should_disable_continuous = context_window_error && self.continuous_mode_enabled;
+
         self.add_to_history(history_cell::new_stream_error_event(message));
+        if should_disable_continuous {
+            self.set_continuous_mode_enabled(false);
+            self.add_to_history(history_cell::new_info_event(
+                "Continuous mode disabled after a context window error.".to_string(),
+                Some("Press Ctrl+G to re-enable continuous mode.".to_string()),
+            ));
+        }
         self.request_redraw();
     }
 
